@@ -89,10 +89,10 @@ struct {
 	enum IRQn_Type irq;
 	uint8_t        group, sub;
 } irqprios[] = {
-    {SysTick_IRQn, 	0, 0},  // just increment timecounter, needed for high precision
-    {USART1_IRQn, 	3, 1},	// i/o
-    {TIM4_IRQn,     3, 3},  // ~1Hz 
-    {None_IRQn, 	0xff, 0xff},
+ 	{SysTick_IRQn,	0, 0},  // just increment timecounter, needed for high precision
+ 	{USART1_IRQn,	3, 1},	// i/o
+ 	{TIM4_IRQn,		3, 3},  // ~1Hz 
+ 	{None_IRQn,	0xff, 0xff},
 };
 /* clang-format on */
 

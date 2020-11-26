@@ -6,10 +6,10 @@
 /* clang-format off */
 
 enum GPIO_Conf {
-	Mode_INA    = 0x0, // 0000 // input analog
-	Mode_IN  	= 0x4, // 0100 // input floating
-	Mode_IPD    = 0x8, // 1000 // input pullup/pulldonw, 
-	Mode_IPU    = 0xC, // 1100 // reserved -> map to 0x8 and set ODR
+	Mode_INA	= 0x0, // 0000 // input analog
+	Mode_INA	= 0x4, // 0100 // input floating
+	Mode_IPD	= 0x8, // 1000 // input pullup/pulldown, 
+	Mode_IPU	= 0xC, // 1100 // reserved -> map to 0x8 and set ODR
 
 	Mode_Out_PP_10MHz = 0x1, Mode_Out_PP_2MHz = 0x2, Mode_Out_PP_50MHz = 0x3, // 00xx  output push-pull
 	Mode_Out_OD_10MHz = 0x5, Mode_Out_OD_2MHz = 0x6, Mode_Out_OD_50MHz = 0x7, // 01xx  output open drain
