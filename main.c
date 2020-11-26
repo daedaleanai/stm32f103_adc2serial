@@ -11,14 +11,7 @@
 
     Pin   Function     DIR   Electrical     Connected to
     ---   ---------    ---   -----------    ---------------------------------------
-    PA0
-    PA1
-    PA2
-    PA3
-    PA4
-    PA5
-    PA6
-    PA7
+    PA0:7 ADC 0:7   IN    Analog
     PA8
     PA9   USART1 TX    out   AF_PP 10MHz
     PA10  USART1 RX    in    PullUp
@@ -28,7 +21,7 @@
     PA14  JTCK/SWCLK
     PA15
 
-    PB0
+    PB0:1 ADC 8:9  IN    Analog
     PB1
     PB2
     PB3
