@@ -7,7 +7,7 @@
 
 enum GPIO_Conf {
 	Mode_INA	= 0x0, // 0000 // input analog
-	Mode_INA	= 0x4, // 0100 // input floating
+	Mode_IN 	= 0x4, // 0100 // input floating
 	Mode_IPD	= 0x8, // 1000 // input pullup/pulldown, 
 	Mode_IPU	= 0xC, // 1100 // reserved -> map to 0x8 and set ODR
 
