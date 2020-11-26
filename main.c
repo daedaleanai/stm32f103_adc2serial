@@ -63,7 +63,11 @@ static struct gpio_config_t {
 	enum GPIO_Pin  pins;
 	enum GPIO_Conf mode;
 } pin_cfgs[] = {
-    {PAAll, Mode_IN}, {PBAll, Mode_IN}, {USART1_TX_PIN, Mode_AF_PP_50MHz}, {USART1_RX_PIN, Mode_IPU}, {LED0_PIN, Mode_Out_OD_2MHz},
+    {PAAll, Mode_IN},
+    {PBAll, Mode_IN}, 
+    {USART1_TX_PIN, Mode_AF_PP_50MHz}, 
+    {USART1_RX_PIN, Mode_IPU}, 
+    {LED0_PIN, Mode_Out_OD_2MHz},
     {0, 0}, // sentinel
 };
 
@@ -108,7 +112,7 @@ int main(void) {
 		NVIC_SetPriority(irqprios[i].irq, NVIC_EncodePriority(IRQ_PRIORITY_GROUPING, irqprios[i].group, irqprios[i].sub));
 	}
 
-	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN;
+	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN | RCC_APB2ENR_ADC1EN;
 	// RCC.APB1ENR |=;
 	// RCC.AHBENR |= RCC_AHBENR_DMA1EN;
 
@@ -119,9 +123,12 @@ int main(void) {
 	}
 
 	led0_on();
-	gpioLock(PAAll);
-	gpioLock(PBAll);
-	gpioLock(PCAll);
+
+
+	// gpioLock(PAAll);
+	// gpioLock(PBAll);
+	// gpioLock(PCAll);
+
 
 	serial_init(USART_CONS, 8 * 115200, &usart1tx);
 
@@ -132,21 +139,23 @@ int main(void) {
 	serial_printf(USART_CONS, "DEVID:%08lx:%08lx:%08lx\n", UNIQUE_DEVICE_ID[2], UNIQUE_DEVICE_ID[1], UNIQUE_DEVICE_ID[0]);
 	serial_wait(USART_CONS);
 
-	// enable ~1Hz TIM4 to generate ...
-	TIM4.DIER |= TIM_DIER_UIE;
-	TIM4.PSC = 7200 - 1;  // 72MHz / 7200 = 10Khz
-	TIM4.ARR = 11003 - 1; // 10KHz/11000 = .909Hz, avoid resonance by choosing a nice prime number
-	TIM4.CR1 |= TIM_CR1_CEN;
-	NVIC_EnableIRQ(TIM4_IRQn);
+
+
+	// // enable ~1Hz TIM4 to generate ...
+	// TIM4.DIER |= TIM_DIER_UIE;
+	// TIM4.PSC = 7200 - 1;  // 72MHz / 7200 = 10Khz
+	// TIM4.ARR = 11003 - 1; // 10KHz/11000 = .909Hz, avoid resonance by choosing a nice prime number
+	// TIM4.CR1 |= TIM_CR1_CEN;
+	// NVIC_EnableIRQ(TIM4_IRQn);
 
 	// Initialize the independent watchdog
-	while (IWDG.SR != 0)
-		__NOP();
+	// while (IWDG.SR != 0)
+	// 	__NOP();
 
-	IWDG.KR  = 0x5555; // enable watchdog config
-	IWDG.PR  = 0;      // prescaler /4 -> 10khz
-	IWDG.RLR = 3200;   // count to 3200 -> 320ms timeout
-	IWDG.KR  = 0xcccc; // start watchdog countdown
+	// IWDG.KR  = 0x5555; // enable watchdog config
+	// IWDG.PR  = 0;      // prescaler /4 -> 10khz
+	// IWDG.RLR = 3200;   // count to 3200 -> 320ms timeout
+	// IWDG.KR  = 0xcccc; // start watchdog countdown
 
 	uint64_t now       = cycleCount();
 	uint64_t laststats = now;
@@ -154,7 +163,7 @@ int main(void) {
 	uint32_t mainloops = 0;
 	uint32_t idleloops = 0;
 
-	led0_off();
+//	led0_off();
 
 	for (;; ++mainloops) {
 
