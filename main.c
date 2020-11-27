@@ -56,7 +56,7 @@ static struct gpio_config_t {
 	enum GPIO_Pin  pins;
 	enum GPIO_Conf mode;
 } pin_cfgs[] = {
-    {PAAll, Mode_IN},
+    {PAAll, Mode_INA}, // analog in
     {PBAll, Mode_IN}, 
     {USART1_TX_PIN, Mode_AF_PP_50MHz}, 
     {USART1_RX_PIN, Mode_IPU}, 
@@ -115,23 +115,46 @@ int main(void) {
 		gpioConfig(p->pins, p->mode);
 	}
 
-	led0_on();
+	// set clock for adc low enough (less than 14 MHz)
+	RCC.CFGR |= RCC_CFGR_ADCPRE_DIV6;
+	// pwr on
+	ADC1.CR2 |= ADC_CR2_ADON;
+	delay(100);
+	// calibrate
+	ADC1.CR2 |= ADC_CR2_CAL;
+	delay(100);
+
+	// set mode: single, only one channel, how long to measure for
+	// not much to set, since this is the default mode. channel 0, only one measurement and so on
+	ADC1.SQR3 |= (4u); // channel 4
+	ADC1.SMPR2 |= (0b110000000000000); // sample time of 71.5 cycles at channel 4
+
+	// start first sense / conversion
+	ADC1.CR2 |= ADC_CR2_ADON; // will write to register once finished
+
+
+
+	led0_toggle();
 
 
 	// gpioLock(PAAll);
 	// gpioLock(PBAll);
 	// gpioLock(PCAll);
 
+	
 
-	serial_init(USART_CONS, 8 * 115200, &usart1tx);
+		delay(10);
 
-	serial_printf(USART_CONS, "SWREV:%s\n", __REVISION__);
-	serial_printf(USART_CONS, "RESET:%02x%s%s%s%s%s%s\n", rf, rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "", rf & 0x20 ? " IWDG" : "",
-	              rf & 0x10 ? " SFT" : "", rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
-	serial_printf(USART_CONS, "CPUID:%08lx\n", SCB.CPUID);
-	serial_printf(USART_CONS, "DEVID:%08lx:%08lx:%08lx\n", UNIQUE_DEVICE_ID[2], UNIQUE_DEVICE_ID[1], UNIQUE_DEVICE_ID[0]);
-	serial_wait(USART_CONS);
+		led0_toggle();
 
+		serial_init(USART_CONS, 8 * 115200, &usart1tx);
+
+		serial_printf(USART_CONS, "SWREV:%s\n", __REVISION__);
+		serial_printf(USART_CONS, "RESET:%02x%s%s%s%s%s%s\n", rf, rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "",
+		              rf & 0x20 ? " IWDG" : "", rf & 0x10 ? " SFT" : "", rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
+		serial_printf(USART_CONS, "CPUID:%08lx\n", SCB.CPUID);
+		serial_printf(USART_CONS, "DEVID:%08lx:%08lx:%08lx\n", UNIQUE_DEVICE_ID[2], UNIQUE_DEVICE_ID[1], UNIQUE_DEVICE_ID[0]);
+		serial_wait(USART_CONS);
 
 
 	// // enable ~1Hz TIM4 to generate ...
@@ -164,12 +187,19 @@ int main(void) {
 		now = cycleCount();
 
 		// do stuff
+		led0_toggle();
 
+		// read out value from adc register
+		uint32_t read_out = (ADC1.DR); //<< ADC_DR_DATA);
+
+		// start first sense / conversion
+		ADC1.CR2 |= ADC_CR2_ADON; // will write to register once finished
 
 		if (laststats + CLOCKSPEED_HZ < now) {
 			// serial_printf(USART_CONS,"\033[H");
 			serial_printf(USART_CONS, "cycles %li idle %li duty %lli / %lli us\n", mainloops, idleloops, dutyc / C_US,
-			              (now - laststats) / C_US);
+			             (now - laststats) / C_US);
+			serial_printf(USART_CONS, "Measurement: %li", read_out);
 			serial_wait(USART_CONS);
 			laststats = now;
 			dutyc     = 0;

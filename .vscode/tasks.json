@@ -1,0 +1,31 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Flash",
+            "type": "shell",
+            "command": "make flash",
+            "group": "test"
+        },
+        {
+            "dependsOn": "Flash",
+            "label": "Set Baudrate",
+            "type": "shell",
+            "command": "stty -F /dev/ttyACM0 921600",
+            "group": "test"
+        },
+        {
+            "dependsOn": "Set Baudrate",
+            "label": "Listen to Serial",
+            "type": "shell",
+            "command": "cat < /dev/ttyACM0",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        }
+    ]
+}
