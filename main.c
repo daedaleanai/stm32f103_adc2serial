@@ -87,9 +87,15 @@ void DMA1_Channel1_IRQ_Handler(void) {
         adctime = cycleCount();
         ++adccount;
 
-        led0_toggle();
+//        led0_toggle();
 }
 
+void TIM3_IRQ_Handler(void) {
+        if ((TIM3.SR & TIM_SR_UIF) == 0)
+                return;
+        TIM3.SR &= ~TIM_SR_UIF;
+        led0_toggle();
+}
 
 
 /* clang-format off */
@@ -100,6 +106,7 @@ struct {
 } irqprios[] = {
  	{SysTick_IRQn,       0, 0},
  	{DMA1_Channel1_IRQn, 1, 0},
+ 	{TIM3_IRQn,        2, 0},
  	{USART1_IRQn,        3, 0},
  	{None_IRQn,	0xff, 0xff},
 };
@@ -118,8 +125,8 @@ int main(void) {
 	}
 
 	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN | RCC_APB2ENR_ADC1EN;
-	// RCC.APB1ENR |=;
-	// RCC.AHBENR |= RCC_AHBENR_DMA1EN;
+	RCC.APB1ENR |= RCC_APB1ENR_TIM3EN;
+	RCC.AHBENR  |= RCC_AHBENR_DMA1EN;
  	RCC.CFGR |= RCC_CFGR_ADCPRE_DIV6; // ADC clock 72/6 MHz = 12 Mhz, must be < 14MHz
 
 
@@ -153,7 +160,7 @@ int main(void) {
 
  	// scan adc0..9 triggered by timer 3, using dma.
  	// use 13.5 cycles sample time +12.5 = 26 cycles at 12Mhz = 2.16667us per sample so 21.6667 us per cycle, triggered every 10ms
- 	ADC1.CR1 |= ADC_CR1_SCAN ;
+ 	ADC1.CR1 |= ADC_CR1_SCAN;
  	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4<<17) | ADC_CR2_DMA; // Trigger from Timer 3 TRGO event.
  	ADC1.SMPR2 = 0b010010010010010010010010010010; 		 // SMPR0..9 to 010 ->  13.5 cycles
  	ADC1.SQR1 = (10-1) << 20; 							 // 10 conversions
@@ -170,9 +177,10 @@ int main(void) {
 
 	// enable 100Hz TIM3 to trigger ADC
 	TIM3.PSC = 7200 - 1;  	// 72MHz / 7200 = 10Khz
-	TIM3.ARR = 100 - 1; 	// 10KHz/100 = 100Hz
+	TIM3.ARR = 1000 - 1; 	// 10KHz/1000 = 10Hz
 	TIM3.CR2 |= (2<<4);     // TRGO is update event
 	TIM3.CR1 |= TIM_CR1_CEN;
+	NVIC_EnableIRQ(TIM3_IRQn);
 
 	// ADC/DMA errors will cause the watchdog to cease being triggered
 	// Initialize the independent watchdog
