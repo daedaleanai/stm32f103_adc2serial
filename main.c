@@ -74,6 +74,18 @@ static inline void led0_toggle(void) { digitalToggle(LED0_PIN); }
 
 static struct Ringbuffer usart1tx;
 
+static volatile uint64_t adccount = 0;
+static volatile uint64_t adctime  = 0; // time of last DMA transfer completion
+static uint32_t adcdata[16]; // up to 16 samples
+
+// ADC1 DMA Transfer Complete 
+void DMA1_Channel1_IRQ_Handler(void) {
+        DMA1.IFCR = DMA1.ISR & 0x000f;
+        adctime = cycleCount();
+        ++adccount;
+}
+
+
 
 /* clang-format off */
 enum { IRQ_PRIORITY_GROUPING = 5 }; // prio[7:6] : 4 groups,  prio[5:4] : 4 subgroups
@@ -81,9 +93,9 @@ struct {
 	enum IRQn_Type irq;
 	uint8_t        group, sub;
 } irqprios[] = {
- 	{SysTick_IRQn,	0, 0},  // just increment timecounter, needed for high precision
- 	{USART1_IRQn,	3, 1},	// i/o
- 	{TIM4_IRQn,		3, 3},  // ~1Hz 
+ 	{SysTick_IRQn,       0, 0},
+ 	{DMA1_Channel1_IRQn, 1, 0},
+ 	{USART1_IRQn,        3, 0},
  	{None_IRQn,	0xff, 0xff},
 };
 /* clang-format on */
@@ -126,79 +138,72 @@ int main(void) {
 	serial_wait(USART_CONS);
 
 
- 	ADC1.CR2 |= ADC_CR2_ADON;         // first wake up
+ 	ADC1.CR2 |= ADC_CR2_ADON;       // first wake up
  	delay(10);
  	ADC1.CR2 |= ADC_CR2_CAL;        // start calibrate
  	while (ADC1.CR2 & ADC_CR2_CAL)  // wait until done
  		__NOP();
 
+ 	// scan adc0..9 triggered by timer 3, using dma.
+ 	// use 13.5 cycles sample time +12.5 = 26 cycles at 12Mhz = 2.16667us per sample so 21.6667 us per cycle, triggered every 10ms
  	ADC1.CR1 |= ADC_CR1_SCAN ;
- 	ADC1.CR2 |= ADC_CR2_TSVREFE |ADC_CR2_EXTTRIG | (5<<17) | ADC_CR2_DMA; // Timer 4 CC4 event
- 	ADC1.SMPR1 = 0b011011 << 18;  // SMP17 and 16 to 011, -> 28.5 cycles 
- 	ADC1.SMPR2 = 0b010010010010010010010010010010; // SMPR0..9 to 010 -> 13.5 cycles
- 	ADC1.SQR1 = (12-1) << 20; // 12 conversions
- 	ADC1.SQR2 = 6 | (7<<5) | (8<<10) | (9<<15) | (16 << 20) | (17 << 25);
+ 	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4<<17) | ADC_CR2_DMA; // Trigger from Timer 3 TRGO event.
+ 	ADC1.SMPR2 = 0b010010010010010010010010010010; 		 // SMPR0..9 to 010 ->  13.5 cycles
+ 	ADC1.SQR1 = (10-1) << 20; 							 // 10 conversions
+ 	ADC1.SQR2 = 6 | (7<<5) | (8<<10) | (9<<15);   		 // channels 0...9 in that order
  	ADC1.SQR3 = 0 | (1<<5) | (2<<10) | (3<<15) | (4<<20) | (5<<25);
-
-
  	ADC1.CR2 |= ADC_CR2_ADON;         // up & go.
 
+ 	DMA1_Channel1.CCR   = (2<<10) | (2<<8) | DMA_CCR1_MINC | DMA_CCR2_CIRC | DMA_CCR1_TCIE;
+    DMA1_Channel1.CPAR  = (uint32_t)&ADC1.DR;
+    DMA1_Channel1.CMAR  = (uint32_t)&adcdata[0];
+    DMA1_Channel1.CNDTR = ((ADC1.SQR1 >> 20) & 0xf) + 1; // number of conversions in scan
+	DMA1_Channel1.CCR  |= DMA_CCR1_EN;
+	NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
-	// enable 100Hz TIM4 to trigger ADC
-	TIM4.PSC = 7200 - 1;  	// 72MHz / 7200 = 10Khz
-	TIM4.ARR = 100 - 1; 	// 10KHz/100 = 100Hz
-	TIM4.CR1 |= TIM_CR1_CEN;
+	// enable 100Hz TIM3 to trigger ADC
+	TIM3.PSC = 7200 - 1;  	// 72MHz / 7200 = 10Khz
+	TIM3.ARR = 100 - 1; 	// 10KHz/100 = 100Hz
+	TIM3.CR2 |= (2<<4);     // TRGO is update event
+	TIM3.CR1 |= TIM_CR1_CEN;
 
-
+	// ADC/DMA errors will cause the watchdog to cease being triggered
 	// Initialize the independent watchdog
-	// while (IWDG.SR != 0)
-	// 	__NOP();
+	while (IWDG.SR != 0)
+		__NOP();
 
-	// IWDG.KR  = 0x5555; // enable watchdog config
-	// IWDG.PR  = 0;      // prescaler /4 -> 10khz
-	// IWDG.RLR = 3200;   // count to 3200 -> 320ms timeout
-	// IWDG.KR  = 0xcccc; // start watchdog countdown
+	IWDG.KR  = 0x5555; // enable watchdog config
+	IWDG.PR  = 0;      // prescaler /4 -> 10kHz
+	IWDG.RLR = 0xFFF;  // count to 4096 -> 409.6ms timeout
+	IWDG.KR  = 0xcccc; // start watchdog countdown
 
-	uint64_t now       = cycleCount();
-	uint64_t laststats = now;
-	uint64_t dutyc     = 0;
-	uint32_t mainloops = 0;
-	uint32_t idleloops = 0;
+	uint64_t lastreport = 0;
+	int len = ((ADC1.SQR1 >> 20) & 0xf) + 1;
 
-//	led0_off();
-
-	for (;; ++mainloops) {
-
+	for (;;) {
 		__WFI(); // wait for interrupt to change the state of any of the subsystems
-		now = cycleCount();
+		if (lastreport == adccount)
+			continue;
 
-		// do stuff
-		led0_toggle();
+		int64_t skip = adccount - lastreport;
+		lastreport = adccount;
 
-		// read out value from adc register
-		uint32_t read_out = (ADC1.DR); //<< ADC_DR_DATA);
-
-		// start first sense / conversion
-		ADC1.CR2 |= ADC_CR2_ADON; // will write to register once finished
-
-		if (laststats + CLOCKSPEED_HZ < now) {
-			// serial_printf(USART_CONS,"\033[H");
-			serial_printf(USART_CONS, "cycles %li idle %li duty %lli / %lli us\n", mainloops, idleloops, dutyc / C_US,
-			             (now - laststats) / C_US);
-			serial_printf(USART_CONS, "Measurement: %li", read_out);
-			serial_wait(USART_CONS);
-			laststats = now;
-			dutyc     = 0;
-			mainloops = 0;
-			idleloops = 0;
+		if (skip > 1) {
+			serial_printf(USART_CONS, "### skipped %lld\n", skip);
 		}
+	
+		serial_printf(USART_CONS, "%lli %lli", adctime, adccount);
 
-		if (1) {
-			IWDG.KR = 0xAAAA;
+		for (int i = 0; i < len; i++) {
+			serial_printf(USART_CONS, " %4d", (int)(adcdata[i]&0xfff));
 		}
+		serial_printf(USART_CONS, "\n");
 
-		uint64_t active = cycleCount() - now;
-		dutyc += active;
+		IWDG.KR = 0xAAAA;
+
+		if (lastreport != adccount) {
+			serial_printf(USART_CONS, "### overflow\n");
+		}
 
 	} // forever
 
