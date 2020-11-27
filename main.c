@@ -1,4 +1,7 @@
 /*
+ *  At 100Hz ADC sample channels 0..10 and print to UART TX1 (921600 8N1)
+ *  Output is prefixed with time in us and count
+ * 
  */
 #include "stm32f103_md.h"
 
@@ -128,7 +131,7 @@ int main(void) {
 	gpioLock(PBAll);
 	gpioLock(PCAll);
 
-	serial_init(USART_CONS, 8 * 115200, &usart1tx);
+	serial_init(USART_CONS, 921600, &usart1tx);
 
 	serial_printf(USART_CONS, "SWREV:%s\n", __REVISION__);
 	serial_printf(USART_CONS, "RESET:%02x%s%s%s%s%s%s\n", rf, rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "",
@@ -192,7 +195,7 @@ int main(void) {
 			serial_printf(USART_CONS, "### skipped %lld\n", skip);
 		}
 	
-		serial_printf(USART_CONS, "%lli %lli", adctime, adccount);
+		serial_printf(USART_CONS, "%lli %lli", adctime/C_US, adccount);
 
 		for (int i = 0; i < len; i++) {
 			serial_printf(USART_CONS, " %4d", (int)(adcdata[i]&0xfff));
