@@ -33,7 +33,7 @@
     PB7
     PB8
     PB9
-    PB10
+    PB
     PB11
     PB12
     PB13
@@ -86,6 +86,8 @@ void DMA1_Channel1_IRQ_Handler(void) {
         DMA1.IFCR = DMA1.ISR & 0x000f;
         adctime = cycleCount();
         ++adccount;
+
+        led0_toggle();
 }
 
 
@@ -131,6 +133,8 @@ int main(void) {
 	gpioLock(PBAll);
 	gpioLock(PCAll);
 
+	led0_off();
+
 	serial_init(USART_CONS, 921600, &usart1tx);
 
 	serial_printf(USART_CONS, "SWREV:%s\n", __REVISION__);
@@ -172,13 +176,13 @@ int main(void) {
 
 	// ADC/DMA errors will cause the watchdog to cease being triggered
 	// Initialize the independent watchdog
-	while (IWDG.SR != 0)
-		__NOP();
+	// while (IWDG.SR != 0)
+	// 	__NOP();
 
-	IWDG.KR  = 0x5555; // enable watchdog config
-	IWDG.PR  = 0;      // prescaler /4 -> 10kHz
-	IWDG.RLR = 0xFFF;  // count to 4096 -> 409.6ms timeout
-	IWDG.KR  = 0xcccc; // start watchdog countdown
+	// IWDG.KR  = 0x5555; // enable watchdog config
+	// IWDG.PR  = 0;      // prescaler /4 -> 10kHz
+	// IWDG.RLR = 0xFFF;  // count to 4096 -> 409.6ms timeout
+	// IWDG.KR  = 0xcccc; // start watchdog countdown
 
 	uint64_t lastreport = 0;
 	int len = ((ADC1.SQR1 >> 20) & 0xf) + 1;
@@ -207,6 +211,7 @@ int main(void) {
 		if (lastreport != adccount) {
 			serial_printf(USART_CONS, "### overflow\n");
 		}
+		//led0_toggle();
 
 	} // forever
 
