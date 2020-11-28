@@ -253,7 +253,7 @@ void main(void) {
 			int t1 = 2500 + 1000*(jadcdata[0] - 1775)/53;
 			int t2 = t1 / 100;
 			t1 %= 100;
-			serial_printf(&USART1, "# Temp: %d.%02d ℃ Vref:%d mV\n", t2,t1, jadcdata[1] * 3300 / 4096);
+			serial_printf(&USART1, "# Temp: %d.%02d ℃ Vref: %d mV\n", t2,t1, jadcdata[1] * 3300 / 4096);
 		}
 
 		IWDG.KR = 0xAAAA; 		// kick the watchdog
