@@ -1,6 +1,9 @@
 /*
  *  At 100Hz ADC sample channels 0..10 and print to UART TX1 (921600 8N1)
  * 
+ *  Sampling takes about 20us for the scan plus another 40-50 for the injected channels (Vref and Vtemp)
+ *  At 921600 Bd, the serial can send about 100kB/s.  In human readable lines we use about 60 characters per sample.
+ *  The can bus at 1MBit can send about 10k messages per second.
  */
 #include "stm32f103_md.h"
 
