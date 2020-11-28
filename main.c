@@ -1,6 +1,5 @@
 /*
  *  At 100Hz ADC sample channels 0..10 and print to UART TX1 (921600 8N1)
- *  Output is prefixed with time in us and count
  * 
  */
 #include "stm32f103_md.h"
@@ -90,8 +89,6 @@ void ADC1_2_IRQ_Handler(void) {
 	jadcdata[1] = ADC1.JDR2;
 	jadcdata[0] = ADC1.JDR1;
 	ADC1.SR &= ~ADC_SR_JEOC;
-
-	led0_on();
 }
 
 
@@ -229,10 +226,10 @@ void main(void) {
 
 		if (skip > 1) {
 			serial_printf(&USART1, "### skipped %lld\n", skip);
-//			led0_on();
+			led0_on();
 		}
 	
-#if 1
+#if 0
 		// for debug, show precise timings
 		uint64_t us = adctrig/C_US;
 		uint64_t s = us / 1000000;
@@ -253,15 +250,14 @@ void main(void) {
 			int t1 = 2500 + 1000*(jadcdata[0] - 1775)/53;
 			int t2 = t1 / 100;
 			t1 %= 100;
-			serial_printf(&USART1, "# Vsense: %d.%02d ℃ Vref:%d mV\n", t2,t1, jadcdata[1] * 3300 / 4096);
-			led0_off();
+			serial_printf(&USART1, "# Temp: %d.%02d ℃ Vref:%d mV\n", t2,t1, jadcdata[1] * 3300 / 4096);
 		}
 
 		IWDG.KR = 0xAAAA; 		// kick the watchdog
 
 		if (lastreport != adccount) {
 			serial_printf(&USART1, "### overflow\n");
-//			led0_on();
+			led0_on();
 		}
 
 	} // forever
