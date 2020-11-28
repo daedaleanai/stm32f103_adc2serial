@@ -78,24 +78,23 @@ static inline void led0_toggle(void) { digitalToggle(LED0_PIN); }
 static struct Ringbuffer usart1tx;
 
 static volatile uint64_t adccount = 0;
-static volatile uint64_t adctime  = 0; // time of last DMA transfer completion
+static volatile uint64_t adcdone  = 0; // time of last DMA transfer completion
+static volatile uint64_t adctrig  = 0; // time last ADC trigger
 static uint32_t adcdata[16]; // up to 16 samples
 
 // ADC1 DMA Transfer Complete 
 void DMA1_Channel1_IRQ_Handler(void) {
-        DMA1.IFCR = DMA1.ISR & 0x000f;
-        adctime = cycleCount();
-        ++adccount;
-
-//        led0_toggle();
+    adcdone = cycleCount();
+    ++adccount;
+    DMA1.IFCR = DMA1.ISR & 0x000f;
 }
 
 void TIM3_IRQ_Handler(void) {
-        if ((TIM3.SR & TIM_SR_UIF) == 0)
-                return;
-        TIM3.SR &= ~TIM_SR_UIF;
-        led0_toggle();
-}
+    if ((TIM3.SR & TIM_SR_UIF) == 0)
+            return;
+    adctrig = cycleCount();
+    TIM3.SR &= ~TIM_SR_UIF;
+ }
 
 
 /* clang-format off */
@@ -106,13 +105,13 @@ struct {
 } irqprios[] = {
  	{SysTick_IRQn,       0, 0},
  	{DMA1_Channel1_IRQn, 1, 0},
- 	{TIM3_IRQn,        2, 0},
+ 	{TIM3_IRQn,          2, 0},
  	{USART1_IRQn,        3, 0},
  	{None_IRQn,	0xff, 0xff},
 };
 /* clang-format on */
 
-int main(void) {
+void main(void) {
 
 	uint8_t rf = (RCC.CSR >> 24) & 0xfc;
 	RCC.CSR |= RCC_CSR_RMVF; // Set RMVF bit to clear the reset flags
@@ -127,10 +126,9 @@ int main(void) {
 	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN | RCC_APB2ENR_ADC1EN;
 	RCC.APB1ENR |= RCC_APB1ENR_TIM3EN;
 	RCC.AHBENR  |= RCC_AHBENR_DMA1EN;
- 	RCC.CFGR |= RCC_CFGR_ADCPRE_DIV6; // ADC clock 72/6 MHz = 12 Mhz, must be < 14MHz
+ 	RCC.CFGR    |= RCC_CFGR_ADCPRE_DIV6; // ADC clock 72/6 MHz = 12 Mhz, must be < 14MHz
 
-
-	delay(10);
+	delay(10); // let all clocks and peripherals start up
 
 	for (const struct gpio_config_t* p = pin_cfgs; p->pins; ++p) {
 		gpioConfig(p->pins, p->mode);
@@ -159,7 +157,8 @@ int main(void) {
  		__NOP();
 
  	// scan adc0..9 triggered by timer 3, using dma.
- 	// use 13.5 cycles sample time +12.5 = 26 cycles at 12Mhz = 2.16667us per sample so 21.6667 us per cycle, triggered every 10ms
+ 	// use 13.5 cycles sample time +12.5 = 26 cycles at 12Mhz = 2.16667us per sample 
+ 	// so 21.6667 us per cycle, triggered every 10ms
  	ADC1.CR1 |= ADC_CR1_SCAN;
  	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4<<17) | ADC_CR2_DMA; // Trigger from Timer 3 TRGO event.
  	ADC1.SMPR2 = 0b010010010010010010010010010010; 		 // SMPR0..9 to 010 ->  13.5 cycles
@@ -176,24 +175,25 @@ int main(void) {
 	NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 	// enable 100Hz TIM3 to trigger ADC
+	TIM3.DIER |= TIM_DIER_UIE;
 	TIM3.PSC = 7200 - 1;  	// 72MHz / 7200 = 10Khz
-	TIM3.ARR = 1000 - 1; 	// 10KHz/1000 = 10Hz
+	TIM3.ARR = 100 - 1; 	// 10KHz/100 = 100Hz
 	TIM3.CR2 |= (2<<4);     // TRGO is update event
 	TIM3.CR1 |= TIM_CR1_CEN;
 	NVIC_EnableIRQ(TIM3_IRQn);
 
 	// ADC/DMA errors will cause the watchdog to cease being triggered
 	// Initialize the independent watchdog
-	// while (IWDG.SR != 0)
-	// 	__NOP();
+	while (IWDG.SR != 0)
+		__NOP();
 
-	// IWDG.KR  = 0x5555; // enable watchdog config
-	// IWDG.PR  = 0;      // prescaler /4 -> 10kHz
-	// IWDG.RLR = 0xFFF;  // count to 4096 -> 409.6ms timeout
-	// IWDG.KR  = 0xcccc; // start watchdog countdown
+	IWDG.KR  = 0x5555; // enable watchdog config
+	IWDG.PR  = 0;      // prescaler /4 -> 10kHz
+	IWDG.RLR = 0xFFF;  // count to 4096 -> 409.6ms timeout
+	IWDG.KR  = 0xcccc; // start watchdog countdown
 
 	uint64_t lastreport = 0;
-	int len = ((ADC1.SQR1 >> 20) & 0xf) + 1;
+	int len = ((ADC1.SQR1 >> 20) & 0xf) + 1;  // number of conversions
 
 	for (;;) {
 		__WFI(); // wait for interrupt to change the state of any of the subsystems
@@ -205,23 +205,29 @@ int main(void) {
 
 		if (skip > 1) {
 			serial_printf(USART_CONS, "### skipped %lld\n", skip);
+			led0_on();
 		}
 	
-		serial_printf(USART_CONS, "%lli %lli", adctime/C_US, adccount);
+#if 0
+		uint64_t us = adctrig/C_US;
+		uint64_t s = us / 1000000;
+		us = us % 1000000;
+		serial_printf(USART_CONS, "%lli.%06lli %lli %lli", s, us, adccount, (adcdone-adctrig)/C_US);
+#else
+		serial_printf(USART_CONS, "%lli", adccount);
+#endif
 
 		for (int i = 0; i < len; i++) {
 			serial_printf(USART_CONS, " %4d", (int)(adcdata[i]&0xfff));
 		}
 		serial_printf(USART_CONS, "\n");
 
-		IWDG.KR = 0xAAAA;
+		IWDG.KR = 0xAAAA; 		// kick the watchdog
 
 		if (lastreport != adccount) {
 			serial_printf(USART_CONS, "### overflow\n");
+			led0_on();
 		}
-		//led0_toggle();
 
 	} // forever
-
-	return 0;
 }
