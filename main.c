@@ -60,22 +60,39 @@ static struct Ringbuffer usart1tx;
 static volatile uint64_t adctrig  = 0; // time last ADC trigger
 static volatile uint64_t adcdone  = 0; // time of last DMA transfer completion
 static volatile uint64_t adccount = 0;
-static uint32_t adcdata[16]; // up to 16 samples
+static volatile uint32_t adcdata[16]; // up to 16 samples from scan
+static volatile uint16_t jadcdata[4] = {0xaa, 0xbb, 0xcc, 0xdd}; // up to 4 injected channels
+
 
 // ADC1 DMA Transfer Complete 
 void DMA1_Channel1_IRQ_Handler(void) {
+	if ((DMA1.ISR & DMA_ISR_TCIF1) == 0)
+		return;
     adcdone = cycleCount();
     ++adccount;
-    DMA1.IFCR = DMA1.ISR & 0x000f; // clear all dma interrupt flags TODO only xferdone so others cause hang
+    DMA1.IFCR = DMA_ISR_TCIF1;
 }
 
 // Trigger of ADC1 scan
 void TIM3_IRQ_Handler(void) {
     if ((TIM3.SR & TIM_SR_UIF) == 0)
-            return;
+		return;
     adctrig = cycleCount();
     TIM3.SR &= ~TIM_SR_UIF;
  }
+
+// injected conversion done
+void ADC1_2_IRQ_Handler(void) {
+	if ((ADC1.SR & ADC_SR_JEOC) == 0)
+		return;
+	jadcdata[3] = ADC1.JDR4;
+	jadcdata[2] = ADC1.JDR3;
+	jadcdata[1] = ADC1.JDR2;
+	jadcdata[0] = ADC1.JDR1;
+	ADC1.SR &= ~ADC_SR_JEOC;
+
+	led0_on();
+}
 
 
 /* clang-format off */
@@ -86,7 +103,8 @@ struct {
 } irqprios[] = {
  	{SysTick_IRQn,       0, 0},
  	{DMA1_Channel1_IRQn, 1, 0},
- 	{TIM3_IRQn,          2, 0},
+ 	{ADC1_2_IRQn, 		 1, 2},
+ 	{TIM3_IRQn,          1, 3},
  	{USART1_IRQn,        3, 0},
  	{None_IRQn,	0xff, 0xff},
 };
@@ -146,7 +164,7 @@ void main(void) {
  	// use 13.5 cycles sample time +12.5 = 26 cycles at 12Mhz = 2.16667us per sample 
  	// so 21.6667 us per cycle, triggered every 10ms
  	ADC1.CR1 |= ADC_CR1_SCAN | (0b0110 << 16); 			 // simultaneous regular dual mode
- 	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4<<17) | ADC_CR2_DMA; // Trigger from Timer 3 TRGO event.
+ 	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4<<17) | ADC_CR2_DMA ; // Trigger from Timer 3 TRGO event.
 
  	ADC2.CR1 |= ADC_CR1_SCAN; 			 
  	ADC2.CR2 |= ADC_CR2_EXTTRIG | (7<<17) | ADC_CR2_DMA; // Trigger must be set to sw.
@@ -159,6 +177,13 @@ void main(void) {
 
  	ADC2.SQR1 = (5-1) << 20; 							 // 5 conversions
  	ADC1.SQR3 = 1 | (3<<5) | (5<<10) | (7<<15) | (9<20); // channels 1 3 5 7 9 in that order
+
+	// injected sequence: Vref and Temp, automatically after regular scan
+ 	ADC1.CR1 |= ADC_CR1_JAUTO | ADC_CR1_JEOCIE;    // also generate irq when done       
+ 	ADC1.CR2 |= ADC_CR2_TSVREFE;
+ 	ADC1.SMPR1 = (7<< 18) | (7<<21); 		 // SMPR16,17 to 0b111 ->  239.5 cycles @ 12MHz = >20us
+ 	ADC1.JSQR = (1<<20) | (17<<15) | (16<<10); // sample chan 16, 17 into jdata 4,3
+	NVIC_EnableIRQ(ADC1_2_IRQn);
 
 
  	ADC1.CR2 |= ADC_CR2_ADON;         // up & go.
@@ -195,6 +220,7 @@ void main(void) {
 
 	for (;;) {
 		__WFI(); // wait for interrupt to change the state of any of the subsystems
+
 		if (lastreport == adccount)
 			continue;
 
@@ -203,13 +229,14 @@ void main(void) {
 
 		if (skip > 1) {
 			serial_printf(&USART1, "### skipped %lld\n", skip);
-			led0_on();
+//			led0_on();
 		}
 	
 #if 1
+		// for debug, show precise timings
 		uint64_t us = adctrig/C_US;
 		uint64_t s = us / 1000000;
-		us = us % 1000000;
+		us %= 1000000;
 		serial_printf(&USART1, "%lli.%06lli %lli %lli", s, us, adccount, (adcdone-adctrig)/C_US);
 #else
 		serial_printf(&USART1, "%lli", adccount);
@@ -220,11 +247,21 @@ void main(void) {
 		}
 		serial_printf(&USART1, "\n");
 
+		if ((adccount % 100) == 0) {
+			// vref should be around 1.2V, full scale 4096 is about 3.3V or 0.8mV/lsb
+			// Vsense = 1.43V + (T-25C) * 4.3mV * T / C  or 5.3lsb/degree
+			int t1 = 2500 + 1000*(jadcdata[0] - 1775)/53;
+			int t2 = t1 / 100;
+			t1 %= 100;
+			serial_printf(&USART1, "# Vsense: %d.%02d ℃ Vref:%d mV\n", t2,t1, jadcdata[1] * 3300 / 4096);
+			led0_off();
+		}
+
 		IWDG.KR = 0xAAAA; 		// kick the watchdog
 
 		if (lastreport != adccount) {
 			serial_printf(&USART1, "### overflow\n");
-			led0_on();
+//			led0_on();
 		}
 
 	} // forever
