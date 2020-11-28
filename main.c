@@ -15,45 +15,25 @@
     Pin   Function     DIR   Electrical     Connected to
     ---   ---------    ---   -----------    ---------------------------------------
     PA0:7 ADC 0:7      in    Analog         Analog input 0-7
-    PA8
+
     PA9   USART1 TX    out   AF_PP 10MHz
     PA10  USART1 RX    in    PullUp
-    PA11
-    PA12
+
     PA13  SWDIO        in/out               ST-Link programmer
     PA14  SWCLK        in/out               ST-Link programmer
-    PA15
 
     PB0:1 ADC 8:9      in    Analog         Analog input 8,9
-    PB2
-    PB3
-    PB4
-    PB5
-    PB6
-    PB7
-    PB8
-    PB9
-    PB
-    PB11
-    PB12
-    PB13
-    PB14
-    PB15
 
     PC13  LED0         out   OUT_OD 2MHz    On-board yellow LED
-    PC14
-    PC15
 
 */
 
-struct USART_Type* const USART_CONS = &USART1;
-
 enum {
+	ADC0_7_PIN    = PA0|PA1|PA2|PA3|PA4|PA5|PA6|PA7,
+	ADC8_9_PIN    = PB0|PB1,
 	USART1_TX_PIN = PA9,
 	USART1_RX_PIN = PA10,
 	LED0_PIN      = PC13,
-	ADC0_7_PIN    = PA0|PA1|PA2|PA3|PA4|PA5|PA6|PA7,
-	ADC8_9_PIN    = PB0|PB1,
 };
 
 static struct gpio_config_t {
@@ -77,18 +57,19 @@ static inline void led0_toggle(void) { digitalToggle(LED0_PIN); }
 
 static struct Ringbuffer usart1tx;
 
-static volatile uint64_t adccount = 0;
-static volatile uint64_t adcdone  = 0; // time of last DMA transfer completion
 static volatile uint64_t adctrig  = 0; // time last ADC trigger
+static volatile uint64_t adcdone  = 0; // time of last DMA transfer completion
+static volatile uint64_t adccount = 0;
 static uint32_t adcdata[16]; // up to 16 samples
 
 // ADC1 DMA Transfer Complete 
 void DMA1_Channel1_IRQ_Handler(void) {
     adcdone = cycleCount();
     ++adccount;
-    DMA1.IFCR = DMA1.ISR & 0x000f;
+    DMA1.IFCR = DMA1.ISR & 0x000f; // clear all dma interrupt flags TODO only xferdone so others cause hang
 }
 
+// Trigger of ADC1 scan
 void TIM3_IRQ_Handler(void) {
     if ((TIM3.SR & TIM_SR_UIF) == 0)
             return;
@@ -123,7 +104,7 @@ void main(void) {
 		NVIC_SetPriority(irqprios[i].irq, NVIC_EncodePriority(IRQ_PRIORITY_GROUPING, irqprios[i].group, irqprios[i].sub));
 	}
 
-	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN | RCC_APB2ENR_ADC1EN;
+	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN | RCC_APB2ENR_IOPCEN | RCC_APB2ENR_ADC1EN | RCC_APB2ENR_ADC2EN;
 	RCC.APB1ENR |= RCC_APB1ENR_TIM3EN;
 	RCC.AHBENR  |= RCC_AHBENR_DMA1EN;
  	RCC.CFGR    |= RCC_CFGR_ADCPRE_DIV6; // ADC clock 72/6 MHz = 12 Mhz, must be < 14MHz
@@ -140,32 +121,49 @@ void main(void) {
 
 	led0_off();
 
-	serial_init(USART_CONS, 921600, &usart1tx);
+	serial_init(&USART1, 921600, &usart1tx);
 
-	serial_printf(USART_CONS, "SWREV:%s\n", __REVISION__);
-	serial_printf(USART_CONS, "RESET:%02x%s%s%s%s%s%s\n", rf, rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "",
-	              rf & 0x20 ? " IWDG" : "", rf & 0x10 ? " SFT" : "", rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
-	serial_printf(USART_CONS, "CPUID:%08lx\n", SCB.CPUID);
-	serial_printf(USART_CONS, "DEVID:%08lx:%08lx:%08lx\n", UNIQUE_DEVICE_ID[2], UNIQUE_DEVICE_ID[1], UNIQUE_DEVICE_ID[0]);
-	serial_wait(USART_CONS);
+	serial_printf(&USART1, "SWREV:%s\n", __REVISION__);
+	serial_printf(&USART1, "CPUID:%08lx\n", SCB.CPUID);
+	serial_printf(&USART1, "DEVID:%08lx:%08lx:%08lx\n", UNIQUE_DEVICE_ID[2], UNIQUE_DEVICE_ID[1], UNIQUE_DEVICE_ID[0]);
+	serial_printf(&USART1, "RESET:%02x%s%s%s%s%s%s\n", rf, 
+			rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "", rf & 0x20 ? " IWDG" : "", rf & 0x10 ? " SFT" : "", 
+			rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
+	serial_wait(&USART1);
 
 
  	ADC1.CR2 |= ADC_CR2_ADON;       // first wake up
+ 	ADC2.CR2 |= ADC_CR2_ADON;
  	delay(10);
  	ADC1.CR2 |= ADC_CR2_CAL;        // start calibrate
+ 	ADC2.CR2 |= ADC_CR2_CAL;
  	while (ADC1.CR2 & ADC_CR2_CAL)  // wait until done
+ 		__NOP();
+ 	while (ADC2.CR2 & ADC_CR2_CAL)
  		__NOP();
 
  	// scan adc0..9 triggered by timer 3, using dma.
  	// use 13.5 cycles sample time +12.5 = 26 cycles at 12Mhz = 2.16667us per sample 
  	// so 21.6667 us per cycle, triggered every 10ms
- 	ADC1.CR1 |= ADC_CR1_SCAN;
+ 	ADC1.CR1 |= ADC_CR1_SCAN | (0b0110 << 16); 			 // simultaneous regular dual mode
  	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4<<17) | ADC_CR2_DMA; // Trigger from Timer 3 TRGO event.
+
+ 	ADC2.CR1 |= ADC_CR1_SCAN; 			 
+ 	ADC2.CR2 |= ADC_CR2_EXTTRIG | (7<<17) | ADC_CR2_DMA; // Trigger must be set to sw.
+
  	ADC1.SMPR2 = 0b010010010010010010010010010010; 		 // SMPR0..9 to 010 ->  13.5 cycles
- 	ADC1.SQR1 = (10-1) << 20; 							 // 10 conversions
- 	ADC1.SQR2 = 6 | (7<<5) | (8<<10) | (9<<15);   		 // channels 0...9 in that order
- 	ADC1.SQR3 = 0 | (1<<5) | (2<<10) | (3<<15) | (4<<20) | (5<<25);
+ 	ADC2.SMPR2 = ADC1.SMPR2;                             // must be set to same
+
+ 	ADC1.SQR1 = (5-1) << 20; 							 // 5 conversions
+ 	ADC1.SQR3 = 0 | (2<<5) | (4<<10) | (6<<15) | (8<20); // channels 0 2 4 6 8 in that order
+
+ 	ADC2.SQR1 = (5-1) << 20; 							 // 5 conversions
+ 	ADC1.SQR3 = 1 | (3<<5) | (5<<10) | (7<<15) | (9<20); // channels 1 3 5 7 9 in that order
+
+
  	ADC1.CR2 |= ADC_CR2_ADON;         // up & go.
+ 	ADC2.CR2 |= ADC_CR2_ADON;         // up & go.
+
 
  	DMA1_Channel1.CCR   = (2<<10) | (2<<8) | DMA_CCR1_MINC | DMA_CCR2_CIRC | DMA_CCR1_TCIE;
     DMA1_Channel1.CPAR  = (uint32_t)&ADC1.DR;
@@ -204,28 +202,28 @@ void main(void) {
 		lastreport = adccount;
 
 		if (skip > 1) {
-			serial_printf(USART_CONS, "### skipped %lld\n", skip);
+			serial_printf(&USART1, "### skipped %lld\n", skip);
 			led0_on();
 		}
 	
-#if 0
+#if 1
 		uint64_t us = adctrig/C_US;
 		uint64_t s = us / 1000000;
 		us = us % 1000000;
-		serial_printf(USART_CONS, "%lli.%06lli %lli %lli", s, us, adccount, (adcdone-adctrig)/C_US);
+		serial_printf(&USART1, "%lli.%06lli %lli %lli", s, us, adccount, (adcdone-adctrig)/C_US);
 #else
-		serial_printf(USART_CONS, "%lli", adccount);
+		serial_printf(&USART1, "%lli", adccount);
 #endif
 
 		for (int i = 0; i < len; i++) {
-			serial_printf(USART_CONS, " %4d", (int)(adcdata[i]&0xfff));
+			serial_printf(&USART1, " %4d %4d", (int)(adcdata[i]&0xfff), (int)(adcdata[i]>>16));
 		}
-		serial_printf(USART_CONS, "\n");
+		serial_printf(&USART1, "\n");
 
 		IWDG.KR = 0xAAAA; 		// kick the watchdog
 
 		if (lastreport != adccount) {
-			serial_printf(USART_CONS, "### overflow\n");
+			serial_printf(&USART1, "### overflow\n");
 			led0_on();
 		}
 
