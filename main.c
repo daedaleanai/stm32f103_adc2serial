@@ -4,6 +4,8 @@
  *  Sampling takes about 20us for the scan plus another 40-50 for the injected channels (Vref and Vtemp)
  *  At 921600 Bd, the serial can send about 100kB/s.  In human readable lines we use about 60 characters per sample.
  *  The can bus at 1MBit can send about 10k messages per second.
+ *
+ *  The LED will light up when the data is not written out fast enough compared to the ADC sample rate.
  */
 #include "stm32f103_md.h"
 
@@ -81,6 +83,9 @@ void TIM3_IRQ_Handler(void) {
 	if ((TIM3.SR & TIM_SR_UIF) == 0)
 		return;
 	adctrig = cycleCount();
+	uint32_t corr = TIM3.CNT;
+	corr *= TIM3.PSC;
+	adctrig -= corr; 	// correct for if the irq was delayed 
 	TIM3.SR &= ~TIM_SR_UIF;
 }
 
@@ -147,7 +152,7 @@ void main(void) {
 	serial_printf(&USART1, "DEVID:%08lx:%08lx:%08lx\n", UNIQUE_DEVICE_ID[2], UNIQUE_DEVICE_ID[1], UNIQUE_DEVICE_ID[0]);
 	serial_printf(&USART1, "RESET:%02x%s%s%s%s%s%s\n", rf,
 				  rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "", rf & 0x20 ? " IWDG" : "",
-	              rf & 0x10 ? " SFT" : "", rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
+				  rf & 0x10 ? " SFT" : "", rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
 	serial_wait(&USART1);
 
 	ADC1.CR2 |= ADC_CR2_ADON; // first wake up
@@ -197,9 +202,9 @@ void main(void) {
 
 	// enable 100Hz TIM3 to trigger ADC
 	TIM3.DIER |= TIM_DIER_UIE;
-	TIM3.PSC = 7200 - 1;  // 72MHz / 7200 = 10Khz
-	TIM3.ARR = 100 - 1;   // 10KHz/100 = 100Hz
-	TIM3.CR2 |= (2 << 4); // TRGO is update event
+	TIM3.PSC = 72 - 1;     // 72MHz / 72 = 1Mhz
+	TIM3.ARR = 10000 - 1;  // 1MHz/10000 = 100Hz
+	TIM3.CR2 |= (2 << 4);  // TRGO is update event
 	TIM3.CR1 |= TIM_CR1_CEN;
 	NVIC_EnableIRQ(TIM3_IRQn);
 
@@ -217,7 +222,12 @@ void main(void) {
 	int      len        = ((ADC1.SQR1 >> 20) & 0xf) + 1; // number of conversions
 
 	for (;;) {
+		__enable_irq();
+		// empty tx buf so all the printfs below wont block (512 bytes buffer)
+		serial_wait(&USART1);
+
 		__WFI(); // wait for interrupt to change the state of any of the subsystems
+		__disable_irq();
 
 		if (lastreport == adccount)
 			continue;
