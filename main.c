@@ -172,16 +172,16 @@ void main(void) {
 	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4 << 17) | ADC_CR2_DMA; // Trigger from Timer 3 TRGO event.
 
 	ADC2.CR1 |= ADC_CR1_SCAN;
-	ADC2.CR2 |= ADC_CR2_EXTTRIG | (7 << 17) | ADC_CR2_DMA; // Trigger must be set to sw.
+	ADC2.CR2 |= ADC_CR2_EXTTRIG | (7 << 17); // Trigger must be set to sw.
 
 	ADC1.SMPR2 = 0b010010010010010010010010010010; // SMPR0..9 to 010 ->  13.5 cycles
 	ADC2.SMPR2 = ADC1.SMPR2;                       // must be set to same
 
 	ADC1.SQR1 = (5 - 1) << 20;                                   // 5 conversions
-	ADC1.SQR3 = 0 | (2 << 5) | (4 << 10) | (6 << 15) | (8 < 20); // channels 0 2 4 6 8 in that order
+	ADC1.SQR3 = 0 | (2 << 5) | (4 << 10) | (6 << 15) | (8 << 20); // channels 0 2 4 6 8 in that order
 
 	ADC2.SQR1 = (5 - 1) << 20;                                   // 5 conversions
-	ADC2.SQR3 = 1 | (3 << 5) | (5 << 10) | (7 << 15) | (9 < 20); // channels 1 3 5 7 9 in that order
+	ADC2.SQR3 = 1 | (3 << 5) | (5 << 10) | (7 << 15) | (9 << 20); // channels 1 3 5 7 9 in that order
 
 	// injected sequence: Vref and Temp, automatically after regular scan
 	ADC1.CR1 |= ADC_CR1_JAUTO | ADC_CR1_JEOCIE; // also generate irq when done
