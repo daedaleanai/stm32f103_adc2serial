@@ -181,7 +181,7 @@ void main(void) {
 	ADC1.SQR3 = 0 | (2 << 5) | (4 << 10) | (6 << 15) | (8 < 20); // channels 0 2 4 6 8 in that order
 
 	ADC2.SQR1 = (5 - 1) << 20;                                   // 5 conversions
-	ADC1.SQR3 = 1 | (3 << 5) | (5 << 10) | (7 << 15) | (9 < 20); // channels 1 3 5 7 9 in that order
+	ADC2.SQR3 = 1 | (3 << 5) | (5 << 10) | (7 << 15) | (9 < 20); // channels 1 3 5 7 9 in that order
 
 	// injected sequence: Vref and Temp, automatically after regular scan
 	ADC1.CR1 |= ADC_CR1_JAUTO | ADC_CR1_JEOCIE; // also generate irq when done
