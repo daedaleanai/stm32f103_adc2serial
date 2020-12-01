@@ -42,8 +42,8 @@ enum {
 
 /* clang-format off */
 static struct gpio_config_t {
-	enum GPIO_Pin  pins;
-	enum GPIO_Conf mode;
+    enum GPIO_Pin  pins;
+    enum GPIO_Conf mode;
 } pin_cfgs[] = {
     {PAAll, Mode_IN}, // reset
     {PBAll, Mode_IN}, // reset
@@ -78,17 +78,6 @@ void DMA1_Channel1_IRQ_Handler(void) {
 	DMA1.IFCR = DMA_ISR_TCIF1;
 }
 
-// Trigger of ADC1 scan
-void TIM3_IRQ_Handler(void) {
-	if ((TIM3.SR & TIM_SR_UIF) == 0)
-		return;
-	adctrig = cycleCount();
-	uint32_t corr = TIM3.CNT;
-	corr *= TIM3.PSC;
-	adctrig -= corr; 	// correct for if the irq was delayed 
-	TIM3.SR &= ~TIM_SR_UIF;
-}
-
 // injected conversion done
 void ADC1_2_IRQ_Handler(void) {
 	if ((ADC1.SR & ADC_SR_JEOC) == 0)
@@ -100,18 +89,29 @@ void ADC1_2_IRQ_Handler(void) {
 	ADC1.SR &= ~ADC_SR_JEOC;
 }
 
+// Trigger of ADC1 scan
+void TIM3_IRQ_Handler(void) {
+	if ((TIM3.SR & TIM_SR_UIF) == 0)
+		return;
+	adctrig       = cycleCount();
+	uint32_t corr = TIM3.CNT;
+	corr *= TIM3.PSC;
+	adctrig -= corr; // correct for if the irq was delayed
+	TIM3.SR &= ~TIM_SR_UIF;
+}
+
 /* clang-format off */
 enum { IRQ_PRIORITY_GROUPING = 5 }; // prio[7:6] : 4 groups,  prio[5:4] : 4 subgroups
 struct {
-	enum IRQn_Type irq;
-	uint8_t        group, sub;
+    enum IRQn_Type irq;
+    uint8_t        group, sub;
 } irqprios[] = {
- 	{SysTick_IRQn,       0, 0},
- 	{DMA1_Channel1_IRQn, 1, 0},
- 	{ADC1_2_IRQn, 		 1, 2},
- 	{TIM3_IRQn,          1, 3},
- 	{USART1_IRQn,        3, 0},
- 	{None_IRQn,	0xff, 0xff},
+    {SysTick_IRQn,       0, 0},
+    {DMA1_Channel1_IRQn, 1, 0},
+    {ADC1_2_IRQn,        1, 1},
+    {TIM3_IRQn,          1, 2},
+    {USART1_IRQn,        3, 0},
+    {None_IRQn, 0xff, 0xff},
 };
 /* clang-format on */
 
@@ -150,9 +150,8 @@ void main(void) {
 	serial_printf(&USART1, "SWREV:%s\n", __REVISION__);
 	serial_printf(&USART1, "CPUID:%08lx\n", SCB.CPUID);
 	serial_printf(&USART1, "DEVID:%08lx:%08lx:%08lx\n", UNIQUE_DEVICE_ID[2], UNIQUE_DEVICE_ID[1], UNIQUE_DEVICE_ID[0]);
-	serial_printf(&USART1, "RESET:%02x%s%s%s%s%s%s\n", rf,
-				  rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "", rf & 0x20 ? " IWDG" : "",
-				  rf & 0x10 ? " SFT" : "", rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
+	serial_printf(&USART1, "RESET:%02x%s%s%s%s%s%s\n", rf, rf & 0x80 ? " LPWR" : "", rf & 0x40 ? " WWDG" : "", rf & 0x20 ? " IWDG" : "",
+	              rf & 0x10 ? " SFT" : "", rf & 0x08 ? " POR" : "", rf & 0x04 ? " PIN" : "");
 	serial_wait(&USART1);
 
 	ADC1.CR2 |= ADC_CR2_ADON; // first wake up
@@ -170,22 +169,22 @@ void main(void) {
 	// so 21.6667 us per cycle, triggered every 10ms
 	ADC1.CR1 |= ADC_CR1_SCAN | (0b0110 << 16);             // simultaneous regular dual mode
 	ADC1.CR2 |= ADC_CR2_EXTTRIG | (4 << 17) | ADC_CR2_DMA; // Trigger from Timer 3 TRGO event.
+	ADC1.SMPR2 = 0b010010010010010010010010010010;         // SMPR0..9 to 010 ->  13.5 cycles
+	ADC1.SQR1  = (5 - 1) << 20;                            // 5 conversions
+	ADC1.SQR2  = 0;
+	ADC1.SQR3  = 0 | (2 << 5) | (4 << 10) | (6 << 15) | (8 << 20); // channels 0 2 4 6 8 in that order
 
+	// ADC2 is slave
 	ADC2.CR1 |= ADC_CR1_SCAN;
 	ADC2.CR2 |= ADC_CR2_EXTTRIG | (7 << 17); // Trigger must be set to sw.
-
-	ADC1.SMPR2 = 0b010010010010010010010010010010; // SMPR0..9 to 010 ->  13.5 cycles
-	ADC2.SMPR2 = ADC1.SMPR2;                       // must be set to same
-
-	ADC1.SQR1 = (5 - 1) << 20;                                   // 5 conversions
-	ADC1.SQR3 = 0 | (2 << 5) | (4 << 10) | (6 << 15) | (8 << 20); // channels 0 2 4 6 8 in that order
-
-	ADC2.SQR1 = (5 - 1) << 20;                                   // 5 conversions
-	ADC2.SQR3 = 1 | (3 << 5) | (5 << 10) | (7 << 15) | (9 << 20); // channels 1 3 5 7 9 in that order
+	ADC2.SMPR2 = ADC1.SMPR2;                 // must be set to same
+	ADC2.SQR1  = ADC1.SQR1 & (0xf << 20);
+	ADC2.SQR2  = 0;
+	ADC2.SQR3  = 1 | (3 << 5) | (5 << 10) | (7 << 15) | (9 << 20); // channels 1 3 5 7 9 in that order
 
 	// injected sequence: Vref and Temp, automatically after regular scan
-	ADC1.CR1 |= ADC_CR1_JAUTO | ADC_CR1_JEOCIE; // also generate irq when done
-	ADC1.CR2 |= ADC_CR2_TSVREFE;
+	ADC1.CR1 |= ADC_CR1_JAUTO | ADC_CR1_JEOCIE;       // also generate irq when done
+	ADC1.CR2 |= ADC_CR2_TSVREFE;                      // enable Vref and Temp
 	ADC1.SMPR1 = (7 << 18) | (7 << 21);               // SMPR16,17 to 0b111 ->  239.5 cycles @ 12MHz = >20us
 	ADC1.JSQR  = (1 << 20) | (17 << 15) | (16 << 10); // sample chan 16, 17 into jdata 4,3
 	NVIC_EnableIRQ(ADC1_2_IRQn);
@@ -202,9 +201,9 @@ void main(void) {
 
 	// enable 100Hz TIM3 to trigger ADC
 	TIM3.DIER |= TIM_DIER_UIE;
-	TIM3.PSC = 72 - 1;     // 72MHz / 72 = 1Mhz
-	TIM3.ARR = 10000 - 1;  // 1MHz/10000 = 100Hz
-	TIM3.CR2 |= (2 << 4);  // TRGO is update event
+	TIM3.PSC = 72 - 1;    // 72MHz / 72 = 1Mhz
+	TIM3.ARR = 10000 - 1; // 1MHz/10000 = 100Hz
+	TIM3.CR2 |= (2 << 4); // TRGO is update event
 	TIM3.CR1 |= TIM_CR1_CEN;
 	NVIC_EnableIRQ(TIM3_IRQn);
 
@@ -223,8 +222,8 @@ void main(void) {
 
 	for (;;) {
 		__enable_irq();
-		// empty tx buf so all the printfs below wont block (512 bytes buffer)
-		serial_wait(&USART1);
+
+		serial_wait(&USART1); // empty tx buf so all the printfs below wont block (512 bytes buffer)
 
 		__WFI(); // wait for interrupt to change the state of any of the subsystems
 		__disable_irq();
@@ -235,17 +234,18 @@ void main(void) {
 		int64_t skip = adccount - lastreport;
 		lastreport   = adccount;
 
+		// if this loop ran too slowly compared to TIM3 and the ADC, we'll notice here
 		if (skip > 1) {
 			serial_printf(&USART1, "### skipped %lld\n", skip);
 			led0_on();
 		}
 
 #if 0
-		// for debug, show precise timings
-		uint64_t us = adctrig/C_US;
-		uint64_t s = us / 1000000;
-		us %= 1000000;
-		serial_printf(&USART1, "%lli.%06lli %lli %lli", s, us, adccount, (adcdone-adctrig)/C_US);
+        // for debug, show precise timings
+        uint64_t us = adctrig/C_US;
+        uint64_t s = us / 1000000;
+        us %= 1000000;
+        serial_printf(&USART1, "%lli.%06lli %lli %lli", s, us, adccount, (adcdone-adctrig)/C_US);
 #else
 		serial_printf(&USART1, "%lli", adccount);
 #endif
@@ -256,7 +256,8 @@ void main(void) {
 		serial_printf(&USART1, "\n");
 
 		if ((adccount % 100) == 0) {
-			// vref should be around 1.2V, full scale 4096 is about 3.3V or 0.8mV/lsb
+			// The JADC will probably be one cycle old, but we can live with that.
+			// Vref should be around 1.2V, full scale 4096 is about 3.3V or 0.8mV/lsb
 			// Vsense = 1.43V + (T-25C) * 4.3mV * T / C  or 5.3lsb/degree
 			int t1 = 2500 + 1000 * (jadcdata[0] - 1775) / 53;
 			int t2 = t1 / 100;
@@ -266,6 +267,7 @@ void main(void) {
 
 		IWDG.KR = 0xAAAA; // kick the watchdog
 
+		// this shouldnt happen since we run with irq's off
 		if (lastreport != adccount) {
 			serial_printf(&USART1, "### overflow\n");
 			led0_on();
