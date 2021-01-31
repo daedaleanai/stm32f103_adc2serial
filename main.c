@@ -115,7 +115,7 @@ struct {
 };
 /* clang-format on */
 
-void main(void) {
+int main(void) {
 
 	uint8_t rf = (RCC.CSR >> 24) & 0xfc;
 	RCC.CSR |= RCC_CSR_RMVF; // Set RMVF bit to clear the reset flags
@@ -274,4 +274,6 @@ void main(void) {
 		}
 
 	} // forever
+
+	return 0;
 }
