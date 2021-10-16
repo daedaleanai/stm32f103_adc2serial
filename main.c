@@ -265,6 +265,7 @@ int main(void) {
 			serial_printf(&USART1, "# Temp: %d.%02d ℃ Vref: %d mV\n", t2, t1, jadcdata[1] * 3300 / 4096);
 		}
 
+
 		IWDG.KR = 0xAAAA; // kick the watchdog
 
 		// this shouldnt happen since we run with irq's off
